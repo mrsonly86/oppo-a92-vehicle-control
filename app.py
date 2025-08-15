@@ -540,6 +540,338 @@ def api_download_lez_report():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==========================================
+# MOBILE APP API ENDPOINTS
+# ==========================================
+
+@app.route('/api/mobile/vehicle/status/<license_plate>')
+def api_mobile_vehicle_status(license_plate):
+    """Mobile API: Get vehicle emission status and LEZ access"""
+    try:
+        # Look up vehicle in government database
+        vehicle_info = government_api.lookup_vehicle(license_plate) if government_api else {'error': 'API unavailable'}
+        
+        # Get vehicle emission data
+        emission_data = VehicleEmissionData.query.filter_by(license_plate=license_plate).first()
+        
+        # Get recent violations
+        recent_violations = EmissionViolations.query.filter_by(
+            license_plate=license_plate
+        ).order_by(EmissionViolations.timestamp.desc()).limit(5).all()
+        
+        # Check LEZ access for active zones
+        lez_access = {}
+        active_zones = LEZZones.query.filter_by(is_active=True).all()
+        
+        for zone in active_zones:
+            if emission_data and emission_calculator:
+                vehicle_data = {
+                    'vehicle_type': vehicle_info.get('data', {}).get('vehicle_type', 'car'),
+                    'euro_standard': emission_data.euro_standard,
+                    'manufacture_year': emission_data.manufacture_year
+                }
+                
+                compliance = emission_calculator.check_lez_compliance(vehicle_data, zone.to_dict())
+                lez_access[zone.zone_code] = {
+                    'zone_name': zone.zone_name,
+                    'access_permitted': compliance['compliant'],
+                    'restriction_hours': zone.restriction_hours,
+                    'fine_amount': float(zone.fine_amount) if zone.fine_amount else 0
+                }
+        
+        status = {
+            'license_plate': license_plate,
+            'vehicle_found': 'data' in vehicle_info,
+            'emission_data': emission_data.to_dict() if emission_data else None,
+            'lez_access': lez_access,
+            'recent_violations': [v.to_dict() for v in recent_violations],
+            'recommendations': [],
+            'checked_at': datetime.now().isoformat()
+        }
+        
+        # Add recommendations based on status
+        if emission_data:
+            if emission_data.environmental_impact_score > 70:
+                status['recommendations'].append('Consider emission testing and vehicle maintenance')
+            if not emission_data.lez_access_permitted:
+                status['recommendations'].append('Vehicle may not be permitted in LEZ zones')
+            if emission_data.last_emission_test_result == 'fail':
+                status['recommendations'].append('Failed emission test - maintenance required')
+        
+        return jsonify(status)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mobile/lez/zones')
+def api_mobile_lez_zones():
+    """Mobile API: Get LEZ zones for navigation"""
+    try:
+        zones = LEZZones.query.filter_by(is_active=True).all()
+        
+        zones_data = []
+        for zone in zones:
+            zone_info = {
+                'zone_code': zone.zone_code,
+                'zone_name': zone.zone_name,
+                'coordinates': zone.coordinates,
+                'restriction_hours': zone.restriction_hours,
+                'allowed_euro_standards': zone.allowed_euro_standards,
+                'fine_amount': float(zone.fine_amount) if zone.fine_amount else 0,
+                'restriction_summary': f"Fine: {int(zone.fine_amount):,} VND" if zone.fine_amount else "No fine"
+            }
+            zones_data.append(zone_info)
+        
+        return jsonify({
+            'zones': zones_data,
+            'total_zones': len(zones_data),
+            'last_updated': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mobile/navigation/check', methods=['POST'])
+def api_mobile_navigation_check():
+    """Mobile API: Check if route passes through LEZ zones"""
+    try:
+        data = request.get_json()
+        license_plate = data.get('license_plate')
+        route_points = data.get('route_points', [])  # Array of [lat, lng] points
+        
+        if not license_plate or not route_points:
+            return jsonify({'error': 'License plate and route points required'}), 400
+        
+        # Get vehicle emission data
+        emission_data = VehicleEmissionData.query.filter_by(license_plate=license_plate).first()
+        
+        # Check each route point against LEZ zones
+        lez_intersections = []
+        active_zones = LEZZones.query.filter_by(is_active=True).all()
+        
+        for zone in active_zones:
+            if zone.coordinates:
+                try:
+                    zone_coords = json.loads(zone.coordinates)
+                    
+                    # Simple point-in-polygon check (simplified)
+                    for point in route_points:
+                        if _point_in_polygon(point, zone_coords):
+                            # Check if vehicle is permitted
+                            permitted = True
+                            fine_risk = 0
+                            
+                            if emission_data and emission_calculator:
+                                vehicle_data = {
+                                    'vehicle_type': emission_data.vehicle_type if hasattr(emission_data, 'vehicle_type') else 'car',
+                                    'euro_standard': emission_data.euro_standard,
+                                    'manufacture_year': emission_data.manufacture_year
+                                }
+                                
+                                compliance = emission_calculator.check_lez_compliance(vehicle_data, zone.to_dict())
+                                permitted = compliance['compliant']
+                                fine_risk = float(zone.fine_amount) if not permitted and zone.fine_amount else 0
+                            
+                            lez_intersections.append({
+                                'zone_code': zone.zone_code,
+                                'zone_name': zone.zone_name,
+                                'intersection_point': point,
+                                'access_permitted': permitted,
+                                'restriction_hours': zone.restriction_hours,
+                                'fine_risk': fine_risk,
+                                'warning_message': f"LEZ restriction in {zone.zone_name}" if not permitted else None
+                            })
+                            break  # Found intersection, no need to check more points for this zone
+                
+                except json.JSONDecodeError:
+                    continue  # Skip malformed zone data
+        
+        return jsonify({
+            'license_plate': license_plate,
+            'route_safe': len(lez_intersections) == 0 or all(z['access_permitted'] for z in lez_intersections),
+            'lez_intersections': lez_intersections,
+            'total_fine_risk': sum(z['fine_risk'] for z in lez_intersections),
+            'recommendations': _generate_navigation_recommendations(lez_intersections),
+            'checked_at': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mobile/violations/<license_plate>')
+def api_mobile_violations(license_plate):
+    """Mobile API: Get violation history for a vehicle"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = min(request.args.get('per_page', 20, type=int), 50)  # Max 50 per page
+        
+        violations_query = EmissionViolations.query.filter_by(
+            license_plate=license_plate
+        ).order_by(EmissionViolations.timestamp.desc())
+        
+        violations_paginated = violations_query.paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        # Calculate summary statistics
+        total_violations = violations_query.count()
+        unpaid_violations = violations_query.filter(
+            EmissionViolations.fine_status.in_(['pending', 'issued'])
+        ).count()
+        total_fines = violations_query.with_entities(
+            db.func.sum(EmissionViolations.fine_amount)
+        ).scalar() or 0
+        unpaid_fines = violations_query.filter(
+            EmissionViolations.fine_status.in_(['pending', 'issued'])
+        ).with_entities(
+            db.func.sum(EmissionViolations.fine_amount)
+        ).scalar() or 0
+        
+        return jsonify({
+            'license_plate': license_plate,
+            'summary': {
+                'total_violations': total_violations,
+                'unpaid_violations': unpaid_violations,
+                'total_fines': float(total_fines),
+                'unpaid_fines': float(unpaid_fines)
+            },
+            'violations': [v.to_dict() for v in violations_paginated.items],
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': violations_paginated.total,
+                'pages': violations_paginated.pages,
+                'has_next': violations_paginated.has_next,
+                'has_prev': violations_paginated.has_prev
+            }
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mobile/education/tips')
+def api_mobile_education_tips():
+    """Mobile API: Get emission reduction tips and education content"""
+    try:
+        tips = [
+            {
+                'category': 'maintenance',
+                'title': 'Regular Engine Maintenance',
+                'description': 'Keep your engine well-maintained to reduce emissions',
+                'tips': [
+                    'Change engine oil every 5,000-10,000 km',
+                    'Replace air filter regularly',
+                    'Check and maintain proper tire pressure',
+                    'Use recommended fuel octane rating'
+                ]
+            },
+            {
+                'category': 'driving',
+                'title': 'Eco-Friendly Driving',
+                'description': 'Adopt driving habits that reduce emissions',
+                'tips': [
+                    'Avoid aggressive acceleration and braking',
+                    'Maintain steady speeds when possible',
+                    'Use air conditioning efficiently',
+                    'Plan routes to avoid traffic congestion'
+                ]
+            },
+            {
+                'category': 'vehicle_choice',
+                'title': 'Vehicle Selection',
+                'description': 'Choose vehicles with lower environmental impact',
+                'tips': [
+                    'Consider hybrid or electric vehicles',
+                    'Look for Euro 5 or Euro 6 certified vehicles',
+                    'Choose appropriate vehicle size for your needs',
+                    'Research fuel efficiency ratings'
+                ]
+            },
+            {
+                'category': 'lez_compliance',
+                'title': 'LEZ Compliance',
+                'description': 'Stay compliant with Low Emission Zone regulations',
+                'tips': [
+                    'Check LEZ requirements before traveling',
+                    'Keep emission certificates up to date',
+                    'Plan alternative routes if not compliant',
+                    'Consider public transportation in restricted areas'
+                ]
+            }
+        ]
+        
+        # Get current emission standards for reference
+        standards = EmissionStandards.query.filter_by(is_active=True).all()
+        standards_info = {}
+        
+        for standard in standards:
+            vehicle_type = standard.vehicle_type
+            if vehicle_type not in standards_info:
+                standards_info[vehicle_type] = []
+            
+            standards_info[vehicle_type].append({
+                'euro_standard': standard.euro_standard,
+                'year_range': f"{standard.manufacture_year_start}-{standard.manufacture_year_end}",
+                'co_limit': standard.co_limit,
+                'nox_limit': standard.nox_limit
+            })
+        
+        return jsonify({
+            'education_tips': tips,
+            'emission_standards': standards_info,
+            'last_updated': datetime.now().isoformat()
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def _point_in_polygon(point, polygon):
+    """Simple point-in-polygon check using ray casting algorithm"""
+    try:
+        x, y = point[0], point[1]
+        n = len(polygon)
+        inside = False
+        
+        p1x, p1y = polygon[0]
+        for i in range(1, n + 1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        
+        return inside
+    except (IndexError, TypeError, ZeroDivisionError):
+        return False
+
+def _generate_navigation_recommendations(lez_intersections):
+    """Generate navigation recommendations based on LEZ intersections"""
+    recommendations = []
+    
+    if not lez_intersections:
+        recommendations.append("Route is clear of LEZ restrictions")
+        return recommendations
+    
+    restricted_zones = [z for z in lez_intersections if not z['access_permitted']]
+    
+    if restricted_zones:
+        recommendations.append(f"Route passes through {len(restricted_zones)} restricted LEZ zone(s)")
+        recommendations.append("Consider alternative route to avoid fines")
+        
+        total_fine_risk = sum(z['fine_risk'] for z in restricted_zones)
+        if total_fine_risk > 0:
+            recommendations.append(f"Potential fine risk: {int(total_fine_risk):,} VND")
+    
+    permitted_zones = [z for z in lez_intersections if z['access_permitted']]
+    if permitted_zones:
+        recommendations.append(f"Vehicle permitted in {len(permitted_zones)} LEZ zone(s) on route")
+    
+    return recommendations
+
 def video_stream():
     """Generate video stream for web interface"""
     while True:
