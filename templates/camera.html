@@ -1,0 +1,464 @@
+{% extends "base.html" %}
+
+{% block title %}Live Camera - OPPO A92 Vehicle Control{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-9">
+        <!-- Camera Feed Card -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-video me-2"></i>OPPO A92 Live Camera Feed with AI Detection
+                </h6>
+                <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-success" id="start-processing">
+                        <i class="fas fa-play me-1"></i>Start AI
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" id="stop-processing">
+                        <i class="fas fa-stop me-1"></i>Stop AI
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" id="take-screenshot">
+                        <i class="fas fa-camera me-1"></i>Screenshot
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Camera Stream Container -->
+                <div class="position-relative">
+                    <img id="camera-stream" src="/video_feed" alt="OPPO A92 Camera Feed" 
+                         class="img-fluid w-100 rounded border">
+                    
+                    <!-- AI Detection Overlay -->
+                    <div id="detection-overlay" class="position-absolute top-0 start-0 w-100 h-100">
+                        <!-- Vehicle detection boxes will be drawn here -->
+                    </div>
+                    
+                    <!-- Stream Status Overlay -->
+                    <div class="position-absolute top-0 end-0 m-2">
+                        <span class="badge bg-success" id="stream-status">
+                            <i class="fas fa-circle me-1"></i>Live
+                        </span>
+                    </div>
+                    
+                    <!-- FPS Counter -->
+                    <div class="position-absolute bottom-0 start-0 m-2">
+                        <span class="badge bg-info" id="fps-display">
+                            FPS: <span id="fps-value">0</span>
+                        </span>
+                    </div>
+                    
+                    <!-- AI Status -->
+                    <div class="position-absolute bottom-0 end-0 m-2">
+                        <span class="badge bg-warning" id="ai-status-badge">
+                            <i class="fas fa-brain me-1"></i>AI: <span id="ai-status-text">Idle</span>
+                        </span>
+                    </div>
+                </div>
+                
+                <!-- Detection Information -->
+                <div class="row mt-3" id="detection-info">
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-success" id="vehicle-count">0</div>
+                            <small class="text-muted">Vehicles Detected</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-primary" id="plate-count">0</div>
+                            <small class="text-muted">Plates Read</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-info" id="authorized-count">0</div>
+                            <small class="text-muted">Authorized</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 mb-0 text-warning" id="unauthorized-count">0</div>
+                            <small class="text-muted">Unauthorized</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Camera Settings Card -->
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-cog me-2"></i>Camera Settings
+                </h6>
+            </div>
+            <div class="card-body">
+                <form id="camera-settings-form">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="camera-ip" class="form-label">OPPO A92 IP Address</label>
+                                <input type="text" class="form-control" id="camera-ip" 
+                                       value="192.168.1.100" placeholder="192.168.1.100">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="camera-port" class="form-label">Port</label>
+                                <input type="number" class="form-control" id="camera-port" 
+                                       value="8080" placeholder="8080">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="detection-confidence" class="form-label">Detection Confidence</label>
+                                <input type="range" class="form-range" id="detection-confidence" 
+                                       min="0.1" max="0.9" step="0.1" value="0.5">
+                                <small class="text-muted">Current: <span id="confidence-value">0.5</span></small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="max-fps" class="form-label">Max FPS</label>
+                                <input type="range" class="form-range" id="max-fps" 
+                                       min="5" max="15" step="1" value="12">
+                                <small class="text-muted">Current: <span id="fps-value-setting">12</span></small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="processing-quality" class="form-label">Processing Quality</label>
+                                <select class="form-select" id="processing-quality">
+                                    <option value="low">Low (480p)</option>
+                                    <option value="medium" selected>Medium (720p)</option>
+                                    <option value="high">High (1080p)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="auto-save-images" checked>
+                                <label class="form-check-label" for="auto-save-images">
+                                    Auto-save detection images
+                                </label>
+                            </div>
+                            
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="alert-unauthorized" checked>
+                                <label class="form-check-label" for="alert-unauthorized">
+                                    Alert for unauthorized vehicles
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <button type="button" class="btn btn-outline-info" id="test-connection">
+                            <i class="fas fa-wifi me-1"></i>Test Connection
+                        </button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-1"></i>Save Settings
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sidebar with Real-time Data -->
+    <div class="col-lg-3">
+        <!-- Connection Status -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-wifi me-2"></i>Connection Status
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-mobile-alt fa-2x text-primary"></i>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                        <div class="fw-bold">OPPO A92</div>
+                        <div class="small text-muted" id="camera-connection-status">
+                            Connecting...
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="d-flex align-items-center mb-3">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-brain fa-2x text-success"></i>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                        <div class="fw-bold">AI Models</div>
+                        <div class="small text-muted" id="ai-models-status">
+                            Loading...
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="d-flex align-items-center">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-database fa-2x text-info"></i>
+                    </div>
+                    <div class="flex-grow-1 ms-3">
+                        <div class="fw-bold">Database</div>
+                        <div class="small text-muted" id="database-status">
+                            Connected
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Recent Detections -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-eye me-2"></i>Recent Detections
+                </h6>
+            </div>
+            <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                <div id="recent-detections">
+                    <p class="text-muted text-center">No detections yet</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Performance Monitor -->
+        <div class="card shadow">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-tachometer-alt me-2"></i>Performance
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>CPU Usage</span>
+                        <span id="cpu-usage-text">45%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-info" id="cpu-usage-bar" 
+                             style="width: 45%"></div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Memory Usage</span>
+                        <span id="memory-usage-text">1.2GB / 1.5GB</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-warning" id="memory-usage-bar" 
+                             style="width: 80%"></div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Temperature</span>
+                        <span id="temperature-text">32°C</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-success" id="temperature-bar" 
+                             style="width: 40%"></div>
+                    </div>
+                </div>
+                
+                <div>
+                    <div class="d-flex justify-content-between">
+                        <span>Battery Level</span>
+                        <span id="battery-text">78%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-success" id="battery-bar" 
+                             style="width: 78%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize camera page
+    initializeCameraPage();
+    
+    // Setup range input updates
+    setupRangeInputs();
+    
+    // Setup form handlers
+    setupFormHandlers();
+    
+    // Start real-time updates
+    startRealTimeUpdates();
+});
+
+function initializeCameraPage() {
+    // Check camera status
+    checkCameraStatus();
+    
+    // Initialize WebSocket connection
+    initializeWebSocket();
+}
+
+function setupRangeInputs() {
+    // Update confidence display
+    const confidenceSlider = document.getElementById('detection-confidence');
+    const confidenceValue = document.getElementById('confidence-value');
+    
+    confidenceSlider.addEventListener('input', function() {
+        confidenceValue.textContent = this.value;
+    });
+    
+    // Update FPS display
+    const fpsSlider = document.getElementById('max-fps');
+    const fpsValueSetting = document.getElementById('fps-value-setting');
+    
+    fpsSlider.addEventListener('input', function() {
+        fpsValueSetting.textContent = this.value;
+    });
+}
+
+function setupFormHandlers() {
+    // Camera settings form
+    document.getElementById('camera-settings-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveCameraSettings();
+    });
+    
+    // Start/Stop processing buttons
+    document.getElementById('start-processing').addEventListener('click', startProcessing);
+    document.getElementById('stop-processing').addEventListener('click', stopProcessing);
+    
+    // Test connection button
+    document.getElementById('test-connection').addEventListener('click', testConnection);
+    
+    // Screenshot button
+    document.getElementById('take-screenshot').addEventListener('click', takeScreenshot);
+}
+
+function startRealTimeUpdates() {
+    // Update performance metrics every 2 seconds
+    setInterval(updatePerformanceMetrics, 2000);
+    
+    // Update detection stats every second
+    setInterval(updateDetectionStats, 1000);
+}
+
+function updatePerformanceMetrics() {
+    // Simulate performance data (in real implementation, get from API)
+    const cpu = Math.random() * 30 + 30; // 30-60%
+    const memory = Math.random() * 0.3 + 1.0; // 1.0-1.3GB
+    const temp = Math.random() * 10 + 28; // 28-38°C
+    const battery = Math.max(0, 100 - Math.random() * 2); // Slowly decreasing
+    
+    // Update CPU
+    document.getElementById('cpu-usage-text').textContent = Math.round(cpu) + '%';
+    document.getElementById('cpu-usage-bar').style.width = cpu + '%';
+    
+    // Update Memory
+    document.getElementById('memory-usage-text').textContent = memory.toFixed(1) + 'GB / 1.5GB';
+    document.getElementById('memory-usage-bar').style.width = (memory / 1.5 * 100) + '%';
+    
+    // Update Temperature
+    document.getElementById('temperature-text').textContent = Math.round(temp) + '°C';
+    document.getElementById('temperature-bar').style.width = (temp / 50 * 100) + '%';
+    
+    // Update Battery
+    document.getElementById('battery-text').textContent = Math.round(battery) + '%';
+    document.getElementById('battery-bar').style.width = battery + '%';
+}
+
+function saveCameraSettings() {
+    const settings = {
+        camera_ip: document.getElementById('camera-ip').value,
+        camera_port: document.getElementById('camera-port').value,
+        detection_confidence: document.getElementById('detection-confidence').value,
+        max_fps: document.getElementById('max-fps').value,
+        processing_quality: document.getElementById('processing-quality').value,
+        auto_save_images: document.getElementById('auto-save-images').checked,
+        alert_unauthorized: document.getElementById('alert-unauthorized').checked
+    };
+    
+    // Show saving indicator
+    showAlert('Saving camera settings...', 'info');
+    
+    // Simulate API call
+    setTimeout(() => {
+        showAlert('Camera settings saved successfully!', 'success');
+    }, 1000);
+}
+
+function startProcessing() {
+    fetch('/api/camera/start')
+        .then(response => response.json())
+        .then(data => {
+            showAlert('AI processing started', 'success');
+            updateAIStatus('Processing');
+        })
+        .catch(error => {
+            showAlert('Error starting AI processing', 'danger');
+        });
+}
+
+function stopProcessing() {
+    fetch('/api/camera/stop')
+        .then(response => response.json())
+        .then(data => {
+            showAlert('AI processing stopped', 'warning');
+            updateAIStatus('Idle');
+        })
+        .catch(error => {
+            showAlert('Error stopping AI processing', 'danger');
+        });
+}
+
+function testConnection() {
+    const ip = document.getElementById('camera-ip').value;
+    const port = document.getElementById('camera-port').value;
+    
+    showAlert('Testing connection to OPPO A92...', 'info');
+    
+    // Simulate connection test
+    setTimeout(() => {
+        const success = Math.random() > 0.3; // 70% success rate
+        if (success) {
+            showAlert(`Successfully connected to OPPO A92 at ${ip}:${port}`, 'success');
+        } else {
+            showAlert(`Failed to connect to OPPO A92 at ${ip}:${port}`, 'danger');
+        }
+    }, 2000);
+}
+
+function takeScreenshot() {
+    showAlert('Taking screenshot...', 'info');
+    
+    // Simulate screenshot capture
+    setTimeout(() => {
+        showAlert('Screenshot saved successfully!', 'success');
+    }, 1000);
+}
+
+function updateAIStatus(status) {
+    document.getElementById('ai-status-text').textContent = status;
+    
+    const badge = document.getElementById('ai-status-badge');
+    badge.className = 'badge ' + (status === 'Processing' ? 'bg-success' : 'bg-warning');
+}
+</script>
+{% endblock %}

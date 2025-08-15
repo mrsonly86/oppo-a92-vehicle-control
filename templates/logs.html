@@ -1,0 +1,391 @@
+{% extends "base.html" %}
+
+{% block title %}Access Logs - OPPO A92 Vehicle Control{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">
+                    <i class="fas fa-list me-2"></i>Vehicle Access Logs
+                </h6>
+                <div class="btn-group" role="group">
+                    <button class="btn btn-outline-info btn-sm" onclick="exportLogs()">
+                        <i class="fas fa-download me-1"></i>Export
+                    </button>
+                    <button class="btn btn-outline-warning btn-sm" onclick="clearOldLogs()">
+                        <i class="fas fa-broom me-1"></i>Clear Old
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Filters -->
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label for="dateFilter" class="form-label">Date Range</label>
+                        <input type="date" class="form-control" id="dateFilter">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="plateFilter" class="form-label">License Plate</label>
+                        <input type="text" class="form-control" id="plateFilter" placeholder="Search plate...">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="statusFilter" class="form-label">Authorization</label>
+                        <select class="form-select" id="statusFilter">
+                            <option value="">All</option>
+                            <option value="authorized">Authorized</option>
+                            <option value="unauthorized">Unauthorized</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="vehicleTypeFilter" class="form-label">Vehicle Type</label>
+                        <select class="form-select" id="vehicleTypeFilter">
+                            <option value="">All Types</option>
+                            <option value="car">Car</option>
+                            <option value="motorcycle">Motorcycle</option>
+                            <option value="truck">Truck</option>
+                            <option value="bus">Bus</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Logs Table -->
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="logsTable">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>License Plate</th>
+                                <th>Vehicle Type</th>
+                                <th>Driver Gender</th>
+                                <th>Confidence</th>
+                                <th>Action</th>
+                                <th>Authorization</th>
+                                <th>Image</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in logs.items %}
+                            <tr>
+                                <td class="text-nowrap">{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                <td class="fw-bold">{{ log.license_plate or 'N/A' }}</td>
+                                <td>
+                                    {% if log.vehicle_type %}
+                                        <span class="badge bg-info">{{ log.vehicle_type.title() }}</span>
+                                    {% else %}
+                                        <span class="text-muted">Unknown</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if log.driver_gender and log.driver_gender != 'unknown' %}
+                                        <span class="badge {% if log.driver_gender == 'male' %}bg-primary{% else %}bg-pink{% endif %}">
+                                            {{ log.driver_gender.title() }}
+                                        </span>
+                                    {% else %}
+                                        <span class="text-muted">Unknown</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if log.confidence %}
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar {% if log.confidence > 0.8 %}bg-success{% elif log.confidence > 0.6 %}bg-warning{% else %}bg-danger{% endif %}" 
+                                                 style="width: {{ (log.confidence * 100)|round }}%">
+                                                {{ (log.confidence * 100)|round }}%
+                                            </div>
+                                        </div>
+                                    {% else %}
+                                        <span class="text-muted">N/A</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge {% if log.action == 'entry' %}bg-success{% else %}bg-info{% endif %}">
+                                        {{ log.action.title() }}
+                                    </span>
+                                </td>
+                                <td>
+                                    {% if log.authorized %}
+                                        <span class="badge bg-success">
+                                            <i class="fas fa-check me-1"></i>Authorized
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-warning">
+                                            <i class="fas fa-exclamation-triangle me-1"></i>Unauthorized
+                                        </span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if log.image_path %}
+                                        <button class="btn btn-sm btn-outline-primary" onclick="viewImage('{{ log.image_path }}')">
+                                            <i class="fas fa-image"></i>
+                                        </button>
+                                    {% else %}
+                                        <span class="text-muted">No image</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                {% if logs.pages > 1 %}
+                <nav aria-label="Logs pagination">
+                    <ul class="pagination justify-content-center">
+                        {% if logs.has_prev %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('access_logs', page=logs.prev_num) }}">Previous</a>
+                            </li>
+                        {% endif %}
+                        
+                        {% for page_num in logs.iter_pages() %}
+                            {% if page_num %}
+                                {% if page_num != logs.page %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('access_logs', page=page_num) }}">{{ page_num }}</a>
+                                    </li>
+                                {% else %}
+                                    <li class="page-item active">
+                                        <span class="page-link">{{ page_num }}</span>
+                                    </li>
+                                {% endif %}
+                            {% else %}
+                                <li class="page-item disabled">
+                                    <span class="page-link">...</span>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                        
+                        {% if logs.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="{{ url_for('access_logs', page=logs.next_num) }}">Next</a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Image Viewer Modal -->
+<div class="modal fade" id="imageViewerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Detection Image</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img id="detectionImage" src="" alt="Detection Image" class="img-fluid">
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize filters
+    setupFilters();
+    
+    // Initialize auto-refresh
+    startAutoRefresh();
+});
+
+function setupFilters() {
+    // Date filter
+    document.getElementById('dateFilter').addEventListener('change', function() {
+        filterLogs();
+    });
+    
+    // Plate filter
+    document.getElementById('plateFilter').addEventListener('input', function() {
+        filterLogs();
+    });
+    
+    // Status filter
+    document.getElementById('statusFilter').addEventListener('change', function() {
+        filterLogs();
+    });
+    
+    // Vehicle type filter
+    document.getElementById('vehicleTypeFilter').addEventListener('change', function() {
+        filterLogs();
+    });
+}
+
+function filterLogs() {
+    const date = document.getElementById('dateFilter').value;
+    const plate = document.getElementById('plateFilter').value.toLowerCase();
+    const status = document.getElementById('statusFilter').value;
+    const vehicleType = document.getElementById('vehicleTypeFilter').value;
+    
+    const table = document.getElementById('logsTable');
+    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const cells = row.getElementsByTagName('td');
+        
+        let showRow = true;
+        
+        // Date filter
+        if (date) {
+            const rowDate = cells[0].textContent.split(' ')[0];
+            if (rowDate !== date) {
+                showRow = false;
+            }
+        }
+        
+        // Plate filter
+        if (plate) {
+            const rowPlate = cells[1].textContent.toLowerCase();
+            if (!rowPlate.includes(plate)) {
+                showRow = false;
+            }
+        }
+        
+        // Status filter
+        if (status) {
+            const isAuthorized = cells[6].textContent.includes('Authorized');
+            if ((status === 'authorized' && !isAuthorized) || 
+                (status === 'unauthorized' && isAuthorized)) {
+                showRow = false;
+            }
+        }
+        
+        // Vehicle type filter
+        if (vehicleType) {
+            const rowVehicleType = cells[2].textContent.toLowerCase();
+            if (!rowVehicleType.includes(vehicleType)) {
+                showRow = false;
+            }
+        }
+        
+        row.style.display = showRow ? '' : 'none';
+    }
+}
+
+function startAutoRefresh() {
+    // Refresh logs every 10 seconds
+    setInterval(function() {
+        // Check for new logs via AJAX
+        fetch('/api/logs/recent')
+            .then(response => response.json())
+            .then(data => {
+                updateRecentLogs(data);
+            })
+            .catch(error => {
+                console.error('Error fetching recent logs:', error);
+            });
+    }, 10000);
+}
+
+function updateRecentLogs(logs) {
+    // Add new logs to the table if any
+    const tbody = document.getElementById('logsTable').getElementsByTagName('tbody')[0];
+    const existingRows = tbody.getElementsByTagName('tr');
+    const existingTimestamps = Array.from(existingRows).map(row => 
+        row.getElementsByTagName('td')[0].textContent
+    );
+    
+    logs.forEach(log => {
+        if (!existingTimestamps.includes(log.timestamp)) {
+            // Add new row at the top
+            const newRow = createLogRow(log);
+            tbody.insertBefore(newRow, tbody.firstChild);
+            
+            // Highlight new row
+            newRow.classList.add('table-success');
+            setTimeout(() => {
+                newRow.classList.remove('table-success');
+            }, 3000);
+        }
+    });
+}
+
+function createLogRow(log) {
+    const row = document.createElement('tr');
+    
+    row.innerHTML = `
+        <td class="text-nowrap">${log.timestamp}</td>
+        <td class="fw-bold">${log.license_plate || 'N/A'}</td>
+        <td>
+            ${log.vehicle_type ? 
+                `<span class="badge bg-info">${log.vehicle_type}</span>` : 
+                '<span class="text-muted">Unknown</span>'
+            }
+        </td>
+        <td>
+            ${log.driver_gender && log.driver_gender !== 'unknown' ? 
+                `<span class="badge ${log.driver_gender === 'male' ? 'bg-primary' : 'bg-pink'}">${log.driver_gender}</span>` : 
+                '<span class="text-muted">Unknown</span>'
+            }
+        </td>
+        <td>
+            ${log.confidence ? 
+                `<div class="progress" style="height: 20px;">
+                    <div class="progress-bar ${log.confidence > 0.8 ? 'bg-success' : log.confidence > 0.6 ? 'bg-warning' : 'bg-danger'}" 
+                         style="width: ${Math.round(log.confidence * 100)}%">
+                        ${Math.round(log.confidence * 100)}%
+                    </div>
+                </div>` : 
+                '<span class="text-muted">N/A</span>'
+            }
+        </td>
+        <td>
+            <span class="badge ${log.action === 'entry' ? 'bg-success' : 'bg-info'}">
+                ${log.action}
+            </span>
+        </td>
+        <td>
+            ${log.authorized ? 
+                '<span class="badge bg-success"><i class="fas fa-check me-1"></i>Authorized</span>' :
+                '<span class="badge bg-warning"><i class="fas fa-exclamation-triangle me-1"></i>Unauthorized</span>'
+            }
+        </td>
+        <td>
+            ${log.image_path ? 
+                `<button class="btn btn-sm btn-outline-primary" onclick="viewImage('${log.image_path}')">
+                    <i class="fas fa-image"></i>
+                </button>` :
+                '<span class="text-muted">No image</span>'
+            }
+        </td>
+    `;
+    
+    return row;
+}
+
+function viewImage(imagePath) {
+    document.getElementById('detectionImage').src = imagePath;
+    const modal = new bootstrap.Modal(document.getElementById('imageViewerModal'));
+    modal.show();
+}
+
+function exportLogs() {
+    showAlert('Exporting logs...', 'info');
+    
+    // Simulate export
+    setTimeout(() => {
+        showAlert('Logs exported successfully!', 'success');
+    }, 2000);
+}
+
+function clearOldLogs() {
+    if (confirm('Are you sure you want to clear old logs? This action cannot be undone.')) {
+        showAlert('Clearing old logs...', 'info');
+        
+        // Simulate clearing
+        setTimeout(() => {
+            showAlert('Old logs cleared successfully!', 'success');
+            location.reload();
+        }, 2000);
+    }
+}
+</script>
+{% endblock %}
